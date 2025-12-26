@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>宋雅文的圣诞树</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Georgia', serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* 悬浮文字样式 */
+        .overlay {
+            position: absolute;
+            bottom: 5%;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 4rem;
+            color: #fff;
+            text-shadow: 0 0 10px #ff0000, 0 0 20px #00ff00, 0 0 30px #0000ff;
+            font-family: 'Brush Script MT', cursive;
+            margin: 0;
+            opacity: 0.9;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="overlay">
+        <h1>宋雅文 Merry Christmas</h1>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let w, h;
+        // 调整画布尺寸
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // === 配置参数 ===
+        const CONFIG = {
+            treeLayers: 6,        // 树的层数
+            leafCount: 1200,      // 绿叶粒子数量
+            lightCount: 150,      // 彩灯数量
+            snowCount: 200,       // 雪花数量
+            rotationSpeed: 0.005, // 旋转速度
+            viewDistance: 800     // 视距（影响3D透视感）
+        };
+
+        // === 辅助函数 ===
+        function random(min, max) { return Math.random() * (max - min) + min; }
+        
+        // === 粒子类定义 ===
+        class Particle {
+            constructor(type) {
+                this.type = type; // 'leaf' (树叶), 'light' (彩灯), 'star' (顶星)
+                this.reset();
+            }
+
+            reset() {
+                this.angle = random(0, Math.PI * 2);
+                
+                // 树的高度进度 (0: 顶部, 1: 底部)
+                this.yProgress = random(0.02, 1); 
+
+                if (this.type === 'star') {
+                    this.yProgress = 0;
+                    this.angle = 0;
+                    this.radius = 0;
+                    return;
+                }
+
+                // === 核心逻辑：创建分层的树形结构 ===
+                // 将树分为 CONFIG.treeLayers 层
+                const layerIndex = Math.floor(this.yProgress * CONFIG.treeLayers);
+                const layerProgress = (this.yProgress * CONFIG.treeLayers) % 1; // 当前层内的进度
+                
+                // 每一层都是一个圆锥体，底部宽顶部窄
+                // maxOutline 是整个树的大轮廓
+                const maxOutline = 20 + this.yProgress * 250; 
+                
+                // actualRadius 是当前粒子在层级结构中的半径
+                this.radius = layerProgress * maxOutline;
+
+                // 随机化半径，填充树的内部，不仅仅是表面
+                this.radius *= Math.sqrt(random(0.2, 1)); 
+
+                // 属性设置
+                this.y = -250 + this.yProgress * 500; // 将Y坐标映射到屏幕空间
+                
+                // 颜色和大小
+                if (this.type === 'leaf') {
+                    // 绿色深浅不一
+                    const green = Math.floor(random(100, 255));
+                    this.color = `rgba(0, ${green}, 0,`; // alpha 留到绘制时计算
+                    this.size = random(1, 3);
+                } else if (this.type === 'light') {
+                    const colors = ['#ff0000', '#ffd700', '#00ffff', '#ff00ff', '#ffffff'];
+                    this.colorVal = colors[Math.floor(random(0, colors.length))];
+                    this.size = random(3, 6);
+                    this.blinkOffset = random(0, Math.PI * 2);
+                }
+            }
+
+            update(globalAngle) {
+                // 1. 3D 坐标变换 (旋转)
+                const effectiveAngle = this.angle + globalAngle;
+                // x, z 是水平面上的坐标
+                const x = Math.cos(effectiveAngle) * this.radius;
+                const z = Math.sin(effectiveAngle) * this.radius;
+
+                // 2. 3D 投影到 2D (透视投影)
+                // 假设相机在 z 轴负方向
+                const scale = CONFIG.viewDistance / (CONFIG.viewDistance + z + 200);
+                
+                this.screenX = w / 2 + x * scale;
+                this.screenY = h / 2 + this.y * scale + h * 0.05; // 稍微向下移一点
+                this.scale = scale;
+                this.z = z; // 存储 z 用于排序
+            }
+
+            draw(ctx, time) {
+                // 透明度随距离衰减 (雾效)
+                const alpha = Math.min(1, Math.max(0.1, (this.scale - 0.2)));
+
+                if (this.type === 'leaf') {
+                    ctx.fillStyle = this.color + alpha + ')';
+                    ctx.beginPath();
+                    ctx.arc(this.screenX, this.screenY, this.size * this.scale, 0, Math.PI * 2);
+                    ctx.fill();
+                } 
+                else if (this.type === 'light') {
+                    // 彩灯闪烁
+                    const blink = (Math.sin(time * 0.003 + this.blinkOffset) + 1) / 2; 
+                    const glowSize = this.size * this.scale * (0.8 + blink * 0.5);
+                    
+                    ctx.beginPath();
+                    // 光晕效果
+                    const grad = ctx.createRadialGradient(
+                        this.screenX, this.screenY, 0, 
+                        this.screenX, this.screenY, glowSize * 2
+                    );
+                    grad.addColorStop(0, this.colorVal);
+                    grad.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = grad;
+                    ctx.arc(this.screenX, this.screenY, glowSize * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 灯芯
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(this.screenX, this.screenY, glowSize * 0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                } 
+                else if (this.type === 'star') {
+                    drawStar(ctx, this.screenX, this.screenY - 10, 5, 20 * this.scale, 8 * this.scale);
+                }
+            }
+        }
+
+        // === 雪花系统 ===
+        const snowflakes = [];
+        for(let i=0; i<CONFIG.snowCount; i++) {
+            snowflakes.push({
+                x: random(0, w),
+                y: random(0, h),
+                r: random(1, 3),
+                speed: random(0.5, 2),
+                swing: random(0, Math.PI * 2),
+                opacity: random(0.3, 0.8)
+            });
+        }
+
+        // === 绘制五角星函数 ===
+        function drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius) {
+            let rot = Math.PI / 2 * 3;
+            let x = cx;
+            let y = cy;
+            let step = Math.PI / spikes;
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - outerRadius);
+            for (let i = 0; i < spikes; i++) {
+                x = cx + Math.cos(rot) * outerRadius;
+                y = cy + Math.sin(rot) * outerRadius;
+                ctx.lineTo(x, y);
+                rot += step;
+
+                x = cx + Math.cos(rot) * innerRadius;
+                y = cy + Math.sin(rot) * innerRadius;
+                ctx.lineTo(x, y);
+                rot += step;
+            }
+            ctx.lineTo(cx, cy - outerRadius);
+            ctx.closePath();
+            ctx.fillStyle = "#ffd700";
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = "#ffd700";
+            ctx.fill();
+            ctx.shadowBlur = 0; // 重置阴影
+        }
+
+        // === 初始化树 ===
+        const particles = [];
+        // 添加树叶
+        for (let i = 0; i < CONFIG.leafCount; i++) particles.push(new Particle('leaf'));
+        // 添加彩灯
+        for (let i = 0; i < CONFIG.lightCount; i++) particles.push(new Particle('light'));
+        // 添加顶部的星星
+        particles.push(new Particle('star'));
+
+
+        // === 动画循环 ===
+        let globalAngle = 0;
+
+        function animate(time) {
+            // 1. 绘制背景 (深蓝渐变星空)
+            const bgGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, h);
+            bgGrad.addColorStop(0, '#091c32'); // 极夜蓝
+            bgGrad.addColorStop(1, '#000000'); // 黑色边缘
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // 2. 绘制并更新雪花
+            ctx.fillStyle = '#fff';
+            snowflakes.forEach(snow => {
+                ctx.globalAlpha = snow.opacity;
+                ctx.beginPath();
+                ctx.arc(snow.x, snow.y, snow.r, 0, Math.PI*2);
+                ctx.fill();
+                
+                // 移动
+                snow.y += snow.speed;
+                snow.x += Math.sin(snow.swing) * 0.5;
+                snow.swing += 0.05;
+
+                // 循环
+                if (snow.y > h) snow.y = -10;
+                if (snow.x > w) snow.x = 0;
+                if (snow.x < 0) snow.x = w;
+            });
+            ctx.globalAlpha = 1; // 重置透明度
+
+            // 3. 更新树粒子状态
+            globalAngle += CONFIG.rotationSpeed;
+            particles.forEach(p => p.update(globalAngle));
+
+            // 4. Z轴排序 (画家的算法：先画远的，再画近的)
+            particles.sort((a, b) => a.z - b.z);
+
+            // 5. 绘制树粒子
+            particles.forEach(p => p.draw(ctx, time));
+
+            requestAnimationFrame(animate);
+        }
+
+        animate(0);
+
+    </script>
+</body>
+</html>
